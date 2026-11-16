@@ -64,35 +64,28 @@ def input_override(label, live, key, percent=False, maximum=100.0):
 live_tax=None
 tax_note={}
 taxdf=source['taxes'][0]
-with st.expander('OECD series selection (confirm standard combined statutory rate)',expanded=taxdf is not None):
-    upload=st.file_uploader('Optional OECD CSV fallback (original SDMX CSV with REF_AREA, TIME_PERIOD, OBS_VALUE)',type='csv')
-    if upload:
+with st.expander('Corporate tax data (OECD)',expanded=False):
+    upload=st.file_uploader('Optional OECD data CSV fallback',type='csv')
+    if upload is not None:
         try:
             taxdf=pd.read_csv(upload)
-            if not {'REF_AREA','TIME_PERIOD','OBS_VALUE'}.issubset(taxdf): raise ValueError('Missing SDMX columns')
             tax_note={'uploaded_file':upload.name}
-        except Exception as e:
-            st.error(str(e)); taxdf=None
+        except Exception as exc:
+            st.error(f'Unable to read OECD CSV: {exc}')
+            taxdf=None
     if taxdf is not None:
         try:
-            subset=data.tax_series(taxdf[taxdf.REF_AREA==countries[tax_country]])
-            if subset.empty: st.warning('No OECD observations for this jurisdiction.')
+            live_tax,tax_detail=data.standard_corporate_tax(taxdf,countries[tax_country])
+            tax_note.update(tax_detail)
+            if live_tax is None:
+                st.warning(f'No unique combined statutory corporate tax rate for {tax_country}. Use manual override.')
             else:
-                series=st.selectbox('OECD series dimensions',sorted(subset['_series'].unique()))
-                confirmed=st.checkbox('I confirm this is the standard combined central + subcentral statutory corporate tax rate, in percent (not an SME or targeted rate).')
-                selected=subset[subset['_series']==series].copy()
-                selected['TIME_PERIOD']=pd.to_numeric(selected.TIME_PERIOD,errors='coerce')
-                selected['OBS_VALUE']=pd.to_numeric(selected.OBS_VALUE,errors='coerce')
-                selected=selected.dropna(subset=['TIME_PERIOD','OBS_VALUE'])
-                latest=selected[selected.TIME_PERIOD==selected.TIME_PERIOD.max()]
-                st.dataframe(latest,hide_index=True)
-                if confirmed and latest.OBS_VALUE.nunique()==1:
-                    rate=float(latest.OBS_VALUE.iloc[0])
-                    if 0<=rate<=100:
-                        live_tax=rate/100
-                        tax_note.update(year=int(latest.TIME_PERIOD.iloc[0]),series=series)
-                elif confirmed: st.error('Ambiguous observations; use a manual tax input.')
-        except Exception as e: st.error('Cannot interpret OECD CSV: '+str(e))
+                st.success(f'OECD combined statutory tax ({tax_country}): {live_tax:.2%}, year {tax_note["year"]}')
+                st.caption('Automatic selection: statutory (ST), general government (S13), combined corporate rate. Verify the source definition for your project.')
+        except Exception as exc:
+            st.warning(f'OECD selection failed: {exc}. Use manual override.')
+    else:
+        st.warning('OECD is unavailable. Provide a verified manual rate in the overrides panel.')
 
 yields=source['bonds'][0]
 def yield_for(name):
