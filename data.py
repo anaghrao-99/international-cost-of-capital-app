@@ -132,13 +132,24 @@ def bond_detail(slug):
         raise ValueError('Invalid country slug')
     url=f'https://tradingeconomics.com/{slug}/government-bond-yield'
     soup=BeautifulSoup(get(url).text,'html.parser')
-    heading=soup.find('h1')
-    if heading is None or not re.search(r'10\s*year|10\s*y(?:ear)?',heading.get_text(' ',strip=True),re.I):
-        raise ValueError('The quote page is not explicitly labeled as a 10-year bond')
-    # Extract the headline actual, never the forecast; HTML text blocks may
-    # change with the Trading Economics frontend.
-    text=soup.get_text(' ',strip=True)
-    head=re.search(r'\bActual\s+(-?\d{1,3}(?:\.\d{1,5})?)\b',text,re.I)
+    # Trading Economics may use a generic H1 ("Government Bond Yield")
+    # even though the document TITLE and summary specify the 10-year tenor.
+    # Inspect the title and heading/summary, never an unrelated market widget.
+    title=soup.title.get_text(' ',strip=True) if soup.title else ''
+    main=soup.find('main')
+    heading_text=' '.join(
+        h.get_text(' ',strip=True) for h in soup.find_all(['h1','h2'],limit=8)
+    )
+    context=' '.join([title,heading_text])
+    country_label=slug.replace('-',' ')
+    if not re.search(r'10[- ]?year|10\\s*y(?:ear)?\\b|10y\\b',context,re.I):
+        raise ValueError('Neither page title nor primary headings identify a 10-year government yield')
+    if country_label not in context.lower() and not (slug=='united-states' and 'us ' in context.lower()):
+        raise ValueError('Bond quote page title does not match the selected country')
+    # Read the first headline actual value in the main page, not a forecast.
+    # TE currently renders a label "Actual" before the observed quote.
+    text=(main or soup).get_text(' ',strip=True)
+    head=re.search(r'\\bActual\\s+(-?\\d{1,3}(?:\\.\\d{1,5})?)\\b',text,re.I)
     if head is None:
         raise ValueError('Could not locate the current Actual 10-year quote')
     value=float(head.group(1))
