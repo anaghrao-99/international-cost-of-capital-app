@@ -34,7 +34,9 @@ names=sorted(countries)
 with st.sidebar:
     st.header('Project inputs')
     country=st.selectbox('Target country',names,index=names.index('United States'))
-    tax_country=st.selectbox('Tax jurisdiction',names,index=names.index('United States'))
+    use_foreign_tax=st.toggle('Use target-country corporate tax rate',value=False,help='Off: use US corporate tax rate for both currency calculations. On: use the target country rate for both.')
+    tax_country=country if use_foreign_tax else 'United States'
+    st.caption(f'Project tax jurisdiction: {tax_country}')
     erp=st.number_input('USD equity risk premium (%)',0.0,100.0,6.5,0.1)/100
     debt=st.slider('Debt / (debt + equity) (%)',0,99,30)/100
 
@@ -101,12 +103,19 @@ def yield_for(name):
     return (float(rows.iloc[0].yield_rate),rows.iloc[0].to_dict()) if len(rows)==1 else (None,{})
 us,us_meta=yield_for('United States')
 foreign,foreign_meta=yield_for(country)
+if country=='United States' and foreign is None and us is not None:
+    foreign,foreign_meta=us,dict(us_meta,derived='Same US 10-year benchmark; identical currency')
 with st.expander('Source values and manual overrides',expanded=True):
     beta,beta_mode=input_override('Unlevered beta',beta_value,'beta',maximum=20.)
     tax,tax_mode=input_override('Corporate tax rate',live_tax,'tax',True)
     spread,spread_mode=input_override('USD BBB spread',source['spread'][0],'spread',True)
     us,us_mode=input_override('US 10-year government yield',us,'us_yield',True)
-    foreign,foreign_mode=input_override('Target 10-year government yield',foreign,'foreign_yield',True)
+    if country=='United States':
+        foreign=us
+        foreign_mode=dict(mode='linked',note='United States selected: target yield equals US yield')
+        st.caption(f'Target-country 10-year yield: uses the same US benchmark ({us:.3%})' if us is not None else 'Target-country yield: linked to US yield; enter US yield above.')
+    else:
+        foreign,foreign_mode=input_override('Target 10-year government yield',foreign,'foreign_yield',True)
     fs_enabled=st.checkbox('Override target-currency BBB spread')
     fs=None
     if fs_enabled:
@@ -125,6 +134,19 @@ if all(v is not None for v in [beta,tax,spread,us,foreign]):
     x=Inputs(beta,tax,erp,debt,us,foreign,spread,fs)
     try: result=calculate(x)
     except ValueError as e: st.error(str(e)); st.stop()
+    st.subheader('Cost of capital results')
+    usd_col, target_col = st.columns(2)
+    with usd_col:
+        st.markdown('#### 🇺🇸 USD')
+        st.metric('Cost of equity',f"{result['usd_equity']:.2%}")
+        st.metric('Pre-tax cost of debt',f"{result['usd_debt']:.2%}")
+        st.metric('WACC',f"{result['usd_wacc']:.2%}")
+    with target_col:
+        st.markdown(f'#### {country} benchmark currency')
+        st.metric('Cost of equity',f"{result['foreign_equity']:.2%}")
+        st.metric('Pre-tax cost of debt',f"{result['foreign_debt']:.2%}")
+        st.metric('WACC',f"{result['foreign_wacc']:.2%}")
+    st.caption(f'Using the {tax_country} project tax rate ({tax:.2%}) for BOTH calculations; ERP {erp:.2%}; debt financing {debt:.0%}.')
     table=pd.DataFrame({'Metric':['Cost of equity','Pre-tax cost of debt','After-tax cost of debt','WACC'],
                         'USD':[result['usd_equity'],result['usd_debt'],result['usd_debt']*(1-tax),result['usd_wacc']],
                         f'{country} currency':[result['foreign_equity'],result['foreign_debt'],result['foreign_debt']*(1-tax),result['foreign_wacc']]})
@@ -144,7 +166,17 @@ if all(v is not None for v in [beta,tax,spread,us,foreign]):
         st.dataframe(compare.style.format({'Unlevered beta':'{:.4f}','USD WACC':'{:.3%}','Target WACC':'{:.3%}'}))
         st.bar_chart(compare[['USD WACC','Target WACC']])
         st.download_button('Export industry comparison',compare.to_csv(),'industries.csv','text/csv')
-else: st.info('Complete the missing inputs above to show results. No missing value is treated as zero.')
+else:
+    missing=[label for label,value in [
+        ('Unlevered industry beta',beta),('Corporate tax rate',tax),
+        ('USD BBB spread',spread),('US 10-year yield',us),
+        (f'{country} 10-year yield',foreign)] if value is None]
+    st.error('Results are not available yet because these source inputs are missing: '+', '.join(missing)+'.')
+    st.info('Open **Source values and manual overrides** above. For each missing field, tick its manual override, enter a verified rate, and add the source/date. Results then appear automatically. No missing input is silently replaced with zero.')
+    with st.expander('Source error details',expanded=False):
+        for source_name,(_,metadata,error) in source.items():
+            if error: st.write(f'**{source_name}:** {error}')
+    st.caption('The Trading Economics public page may omit its live yield table or block automated requests. In that case use the linked website and a dated manual yield; a live quote cannot be verified automatically.')
 
 with st.expander('Methodology and limitations'):
     st.markdown(r'''
