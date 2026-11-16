@@ -133,19 +133,19 @@ def bond_detail(slug):
     url=f'https://tradingeconomics.com/{slug}/government-bond-yield'
     soup=BeautifulSoup(get(url).text,'html.parser')
     heading=soup.find('h1')
-    if heading is None or not re.search(r'10\\s*year|10\\s*y(?:ear)?',heading.get_text(' ',strip=True),re.I):
+    if heading is None or not re.search(r'10\s*year|10\s*y(?:ear)?',heading.get_text(' ',strip=True),re.I):
         raise ValueError('The quote page is not explicitly labeled as a 10-year bond')
     # Extract the headline actual, never the forecast; HTML text blocks may
     # change with the Trading Economics frontend.
     text=soup.get_text(' ',strip=True)
-    head=re.search(r'\\bActual\\s+(-?\\d{1,3}(?:\\.\\d{1,5})?)\\b',text,re.I)
+    head=re.search(r'\bActual\s+(-?\d{1,3}(?:\.\d{1,5})?)\b',text,re.I)
     if head is None:
         raise ValueError('Could not locate the current Actual 10-year quote')
     value=float(head.group(1))
     if not -20 < value < 100:
         raise ValueError('Implausible 10-year yield')
     # Extract explicit observation date if published in the summary.
-    dates=re.search(r'(?:on|updated on)\\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2},?\\s+20\\d{2})',text,re.I)
+    dates=re.search(r'(?:on|updated on)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+20\d{2})',text,re.I)
     observation=dates.group(1) if dates else 'Date not parsed; verify on source'
     return value/100, meta(url,observation)
 
