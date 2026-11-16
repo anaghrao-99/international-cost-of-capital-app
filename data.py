@@ -145,8 +145,12 @@ def bond_detail(slug):
     if not -20 < value < 100:
         raise ValueError('Implausible 10-year yield')
     # Extract explicit observation date if published in the summary.
-    dates=re.search(r'(?:on|updated on)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+20\d{2})',text,re.I)
-    observation=dates.group(1) if dates else 'Date not parsed; verify on source'
+    dates=re.search(r'last updated on\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})\s+(?:of\s+)?(20\d{2})',text,re.I)
+    if dates:
+        observation=f'{dates.group(1)}, {dates.group(2)}'
+    else:
+        dates=re.search(r'(?:on|updated on)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+20\d{2})',text,re.I)
+        observation=dates.group(1) if dates else 'Date not parsed; verify on source'
     return value/100, meta(url,observation)
 
 def bonds():
