@@ -150,6 +150,9 @@ def bond_detail(slug):
     # TE currently renders a label "Actual" before the observed quote.
     text=(main or soup).get_text(' ',strip=True)
     head=re.search(r'\bActual\s+(-?\d{1,3}(?:\.\d{1,5})?)\b',text,re.I)
+    if head is None and main is not None:
+        text=soup.get_text(' ',strip=True)
+        head=re.search(r'\bActual\s+(-?\d{1,3}(?:\.\d{1,5})?)\b',text,re.I)
     if head is None:
         raise ValueError('Could not locate the current Actual 10-year quote')
     value=float(head.group(1))
