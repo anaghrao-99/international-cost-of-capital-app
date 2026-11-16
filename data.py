@@ -50,7 +50,7 @@ def betas():
 def spread():
     soup=BeautifulSoup(get(SPREAD_URL).text,'html.parser')
     page_text=soup.get_text(' ',strip=True)
-    dated=re.search(r'Date of Analysis:\\s*Data used is as of\\s*([A-Za-z]+\\s+\\d{4})',page_text,re.I)
+    dated=re.search(r'Date of Analysis:\s*Data used is as of\s*([A-Za-z]+\s+\d{4})',page_text,re.I)
     observation=dated.group(1) if dated else 'Not published / not parsed'
     # First large-firm panel: rating cell followed immediately by its spread.
     for row in soup.select('tr'):
@@ -81,6 +81,45 @@ def tax_series(df):
     out['_series']=out[dims].fillna('').astype(str).agg(' | '.join,axis=1) if dims else 'Only series (confirm definition)'
     return out
 
+
+
+def standard_corporate_tax(df, iso3):
+    """Choose only OECD's combined, statutory, general-government corporate rate.
+
+    Fail closed on ambiguous or missing classifications, rather than use the
+    first row from a multi-dimensional OECD dataset.
+    """
+    required={'REF_AREA','TIME_PERIOD','OBS_VALUE'}
+    if not required.issubset(df.columns):
+        raise ValueError('OECD CSV is missing REF_AREA/TIME_PERIOD/OBS_VALUE')
+    rows=df.loc[df['REF_AREA'].astype(str).str.upper()==iso3.upper()].copy()
+    if rows.empty: return None,{}
+    dimension_filters=[
+        (('TARGETING','TAX_TARGET','TAX_TARG'), 'ST'),
+        (('INSTITUTIONAL_SECTOR','SECTOR','INST_SECTOR'), 'S13'),
+    ]
+    for options,code in dimension_filters:
+        column=next((n for n in options if n in rows.columns),None)
+        if column is None:
+            raise ValueError(f'OECD classification column missing for {code}')
+        rows=rows[rows[column].astype(str).str.upper()==code]
+    # OECD 2.0: dimension "MEASURE" stores the combined CIT rate as CIT_C.
+    # If the measure column is absent, it is unsafe to assume the CSV is combined.
+    measure=next((n for n in ('MEASURE','CIT_MEASURE') if n in rows.columns),None)
+    if measure is None: raise ValueError('Cannot identify the combined CIT measure')
+    rows=rows[rows[measure].astype(str).str.upper()=='CIT_C']
+    if rows.empty: return None,{}
+    rows['TIME_PERIOD']=pd.to_numeric(rows['TIME_PERIOD'],errors='coerce')
+    rows['OBS_VALUE']=pd.to_numeric(rows['OBS_VALUE'],errors='coerce')
+    rows=rows.dropna(subset=['TIME_PERIOD','OBS_VALUE'])
+    if rows.empty: return None,{}
+    year=int(rows['TIME_PERIOD'].max())
+    latest=rows[rows['TIME_PERIOD']==year]
+    values=latest['OBS_VALUE'].drop_duplicates()
+    if len(values)!=1: raise ValueError('Ambiguous combined OECD rates for latest year')
+    rate=float(values.iloc[0])
+    if not 0 <= rate <= 100: raise ValueError('OECD tax rate outside 0–100%')
+    return rate/100, {'year':year,'definition':'Combined statutory corporate rate, general government','source':'OECD CIT SDMX 2.0'}
 
 def bonds():
     html=get(BONDS_URL).text
