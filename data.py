@@ -153,28 +153,66 @@ def bond_detail(slug):
         observation=dates.group(1) if dates else 'Date not parsed; verify on source'
     return value/100, meta(url,observation)
 
-def bonds():
-    html=get(BONDS_URL).text
+BONDS_COUNTRY_URL='https://tradingeconomics.com/country-list/government-bond-10y'
+
+def parse_country_bond_table(html):
+    """Parse the public Trading Economics 10Y country-list table.
+
+    Only accept a table explicitly headed Country / Last / Reference;
+    ignore forecasts, unrelated maturities and non-country ad rows.
+    """
     soup=BeautifulSoup(html,'html.parser')
-    records=[]
-    for table in soup.select('table'):
-        headers=[c.get_text(' ',strip=True).lower() for c in table.select('thead th')]
-        # Never assume the first numeric column is the last observed yield.
-        idx=next((i for i,h in enumerate(headers) if h in ('yield','last','actual','10y yield','last yield')),None)
-        if idx is None: continue
-        date_idx=next((i for i,h in enumerate(headers) if h in ('date','time')),None)
-        for row in table.select('tbody tr'):
-            cells=row.find_all(['td','th'],recursive=False)
-            link=row.find('a',href=re.compile('/government-bond-yield'))
-            if not link or idx>=len(cells): continue
-            value=cells[idx].get_text(' ',strip=True).replace('%','').replace(',','')
-            try: value=float(value)/100
-            except ValueError: continue
-            if not -0.2<value<1: continue
-            slug=link['href'].strip('/').split('/')[0]
-            records.append(dict(country=link.get_text(' ',strip=True),slug=slug,yield_rate=value,
-                                observation_date=cells[date_idx].get_text(' ',strip=True) if date_idx is not None and date_idx<len(cells) else 'Unavailable',
-                                source='https://tradingeconomics.com/'+slug+'/government-bond-yield'))
-    if not records:
-        raise ValueError('Trading Economics did not expose a parsable public 10-year yield table (dynamic page or blocked request). Open https://tradingeconomics.com/bonds in your browser and enter the dated 10-year yields using manual overrides. This is a data-source limitation, not a calculation error.')
-    return pd.DataFrame(records).drop_duplicates('slug'),meta(BONDS_URL)
+    output=[]
+    for table in soup.find_all('table'):
+        header=[c.get_text(' ',strip=True).lower().replace('▲','').strip()
+                for c in table.select('thead th')]
+        if not header:
+            top=table.find('tr')
+            if top is not None:
+                header=[c.get_text(' ',strip=True).lower().replace('▲','').strip()
+                        for c in top.find_all(['th','td'],recursive=False)]
+        def col(part):
+            return next((i for i,h in enumerate(header) if h==part or h.startswith(part+' ')),None)
+        country_idx,last_idx,ref_idx=col('country'),col('last'),col('reference')
+        if country_idx is None or last_idx is None or ref_idx is None:
+            continue
+        for tr in table.select('tr'):
+            cells=tr.find_all(['td','th'],recursive=False)
+            if len(cells)<=max(country_idx,last_idx,ref_idx):
+                continue
+            country=cells[country_idx].get_text(' ',strip=True)
+            value=cells[last_idx].get_text(' ',strip=True).replace(',','').replace('%','')
+            date=cells[ref_idx].get_text(' ',strip=True)
+            if not re.fullmatch(r'-?\\d{1,3}(?:\\.\\d+)?',value):
+                continue
+            numeric=float(value)
+            if not (-20<numeric<100):
+                continue
+            if not re.fullmatch(r'[A-Za-z][A-Za-z .()\\-]{1,60}',country):
+                continue
+            if country.lower() in ('report','country list','world'):
+                continue
+            # Reference is often just month/year; preserve it without inventing a day.
+            if not re.fullmatch(r'[A-Za-z]{3}/\\d{2,4}',date):
+                continue
+            slug=re.sub(r'[^a-z0-9]+','-',country.lower()).strip('-')
+            output.append(dict(country=country,slug=slug,yield_rate=numeric/100,
+                               observation_date=date,
+                               source=BONDS_COUNTRY_URL))
+    if not output:
+        raise ValueError('No 10-year country yield table with Country/Last/Reference headings was found')
+    return pd.DataFrame(output).drop_duplicates('country')
+
+
+def bonds():
+    """Fetch country-level 10Y yields from the public, server-rendered TE country list.
+
+    This is a different page than /bonds, whose table is rendered client-side.
+    No API key or preloaded market data are used.
+    """
+    try:
+        html=get(BONDS_COUNTRY_URL).text
+        result=parse_country_bond_table(html)
+    except Exception as exc:
+        raise ValueError(f'Trading Economics country-list fetch failed: {exc}') from exc
+    return result,meta(BONDS_COUNTRY_URL,'See observation_date in each country row')
