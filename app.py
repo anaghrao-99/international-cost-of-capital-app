@@ -22,7 +22,7 @@ def fetch(name):
 
 if st.button('Refresh all source data',help='Clears the one-hour cache and retries every source; overrides remain active.'):
     fetch.clear()
-    fetch_detail_bond.clear()
+    st.cache_data.clear()
     st.rerun()
 source={}
 with st.spinner('Retrieving public sources…'):
