@@ -121,6 +121,34 @@ def standard_corporate_tax(df, iso3):
     if not 0 <= rate <= 100: raise ValueError('OECD tax rate outside 0–100%')
     return rate/100, {'year':year,'definition':'Combined statutory corporate rate, general government','source':'OECD CIT SDMX 2.0'}
 
+
+def bond_detail(slug):
+    """Fetch the actual 10-year yield from a country's Trading Economics bond page.
+
+    Reads explicit Actual quote text rather than forecasts or unrelated maturities.
+    Refuses to invent a quote if the provider blocks access or changes markup.
+    """
+    if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*',slug):
+        raise ValueError('Invalid country slug')
+    url=f'https://tradingeconomics.com/{slug}/government-bond-yield'
+    soup=BeautifulSoup(get(url).text,'html.parser')
+    heading=soup.find('h1')
+    if heading is None or not re.search(r'10\\s*year|10\\s*y(?:ear)?',heading.get_text(' ',strip=True),re.I):
+        raise ValueError('The quote page is not explicitly labeled as a 10-year bond')
+    # Extract the headline actual, never the forecast; HTML text blocks may
+    # change with the Trading Economics frontend.
+    text=soup.get_text(' ',strip=True)
+    head=re.search(r'\\bActual\\s+(-?\\d{1,3}(?:\\.\\d{1,5})?)\\b',text,re.I)
+    if head is None:
+        raise ValueError('Could not locate the current Actual 10-year quote')
+    value=float(head.group(1))
+    if not -20 < value < 100:
+        raise ValueError('Implausible 10-year yield')
+    # Extract explicit observation date if published in the summary.
+    dates=re.search(r'(?:on|updated on)\\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2},?\\s+20\\d{2})',text,re.I)
+    observation=dates.group(1) if dates else 'Date not parsed; verify on source'
+    return value/100, meta(url,observation)
+
 def bonds():
     html=get(BONDS_URL).text
     soup=BeautifulSoup(html,'html.parser')
