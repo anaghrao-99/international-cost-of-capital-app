@@ -123,10 +123,6 @@ def pick_yield(name, prior_value, prior_meta):
     value,metadata,error=fetch_detail_bond(slug)
     return value,metadata,error
 
-if yields is not None:
-    st.caption(f"Trading Economics 10Y table loaded: {len(yields)} countries • reference dates shown under Sources. Rates may have month-level observation dates.")
-else:
-    st.warning('Trading Economics country-list rates could not be retrieved automatically. Detail-page retrieval will be attempted; manual entry remains available.')
 us,us_meta=yield_for('United States')
 us,us_meta,us_fetch_error=pick_yield('United States',us,us_meta)
 if country=='United States':
@@ -135,6 +131,36 @@ if country=='United States':
 else:
     foreign,foreign_meta=yield_for(country)
     foreign,foreign_meta,foreign_fetch_error=pick_yield(country,foreign,foreign_meta)
+
+st.subheader('10-year government bond yields')
+yield_cols=st.columns(2)
+with yield_cols[0]:
+    if us is not None:
+        st.metric('United States 10Y',f'{us:.3%}')
+        st.caption('Source: Trading Economics • '+str(us_meta.get('observation_date','Observation date unavailable')))
+    else:
+        st.error('US 10Y: auto retrieval unavailable')
+with yield_cols[1]:
+    if foreign is not None:
+        st.metric(f'{country} 10Y',f'{foreign:.3%}')
+        st.caption('Source: Trading Economics • '+str(foreign_meta.get('observation_date','Observation date unavailable')))
+    else:
+        st.error(f'{country} 10Y: auto retrieval unavailable')
+if us is None or foreign is None:
+    st.warning('Automatic quote retrieval did not succeed. Enter a verified 10-year yield using the manual overrides below. Source errors are available in Data-fetch diagnostics.')
+    if us_fetch_error: st.caption('US detail-page error: '+str(us_fetch_error))
+    if country!='United States' and foreign_fetch_error:
+        st.caption(f'{country} detail-page error: '+str(foreign_fetch_error))
+    if source['bonds'][2]:
+        st.caption('Country-list error: '+str(source['bonds'][2]))
+elif source['bonds'][2]:
+    st.caption('Trading Economics country-list table was unavailable; the individual bond page supplied the yield.')
+with st.expander('Data-fetch diagnostics'):
+    st.write('Country-list:', source['bonds'][2] or 'Succeeded')
+    st.write('US detail:', us_fetch_error or 'No error / not needed')
+    st.write(f'{country} detail:', foreign_fetch_error or 'No error / not needed')
+    st.write('US observation metadata:',us_meta)
+    st.write('Target observation metadata:',foreign_meta)
 
 with st.expander('Source values and manual overrides',expanded=True):
     beta,beta_mode=input_override('Unlevered beta',beta_value,'beta',maximum=20.)
