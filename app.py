@@ -22,6 +22,7 @@ def fetch(name):
 
 if st.button('Refresh all source data',help='Clears the one-hour cache and retries every source; overrides remain active.'):
     fetch.clear()
+    fetch_detail_bond.clear()
     st.rerun()
 source={}
 with st.spinner('Retrieving public sources…'):
@@ -34,11 +35,16 @@ names=sorted(countries)
 with st.sidebar:
     st.header('Project inputs')
     country=st.selectbox('Target country',names,index=names.index('United States'))
-    use_foreign_tax=st.toggle('Use target-country corporate tax rate',value=False,help='Off: use US corporate tax rate for both currency calculations. On: use the target country rate for both.')
-    tax_country=country if use_foreign_tax else 'United States'
-    st.caption(f'Project tax jurisdiction: {tax_country}')
+
     erp=st.number_input('USD equity risk premium (%)',0.0,100.0,6.5,0.1)/100
     debt=st.slider('Debt / (debt + equity) (%)',0,99,30)/100
+
+st.subheader('Project corporate tax jurisdiction')
+tax_choice=st.radio('Apply the same selected corporate tax rate to both currency calculations',
+    options=['United States','Selected country'],index=0,horizontal=True,key='project_tax_choice',
+    help='The tax rate affects levered beta and the debt tax shield in BOTH currency calculations.')
+tax_country='United States' if tax_choice=='United States' else country
+st.caption(f'Tax jurisdiction used for both calculations: {tax_country}')
 
 beta_df=source['betas'][0]
 industries=sorted(beta_df.industry.astype(str).unique()) if beta_df is not None else ['Software (System & Application)']
@@ -94,10 +100,35 @@ def yield_for(name):
     slug=aliases.get(name,name.lower().replace(' ','-'))
     rows=yields[yields.slug==slug]
     return (float(rows.iloc[0].yield_rate),rows.iloc[0].to_dict()) if len(rows)==1 else (None,{})
+# Prefer the bonds table when available; fall back to the country-specific
+# 10-year quote, which may expose the latest actual while the table is JS-only.
+@st.cache_data(ttl=3600,show_spinner=False)
+def fetch_detail_bond(slug):
+    try:
+        value,metadata=data.bond_detail(slug)
+        return value,metadata,None
+    except Exception as exc:
+        return None,{},str(exc)
+
+def pick_yield(name, prior_value, prior_meta):
+    if prior_value is not None:
+        return prior_value,prior_meta,None
+    aliases={'United States':'united-states','United Kingdom':'united-kingdom',
+             'Korea, Republic of':'south-korea','Russian Federation':'russia',
+             'Türkiye':'turkey','Czechia':'czech-republic'}
+    slug=aliases.get(name,name.lower().replace(' ','-'))
+    value,metadata,error=fetch_detail_bond(slug)
+    return value,metadata,error
+
 us,us_meta=yield_for('United States')
-foreign,foreign_meta=yield_for(country)
-if country=='United States' and foreign is None and us is not None:
-    foreign,foreign_meta=us,dict(us_meta,derived='Same US 10-year benchmark; identical currency')
+us,us_meta,us_fetch_error=pick_yield('United States',us,us_meta)
+if country=='United States':
+    foreign,foreign_meta=us,dict(us_meta)
+    foreign_fetch_error=us_fetch_error
+else:
+    foreign,foreign_meta=yield_for(country)
+    foreign,foreign_meta,foreign_fetch_error=pick_yield(country,foreign,foreign_meta)
+
 with st.expander('Source values and manual overrides',expanded=True):
     beta,beta_mode=input_override('Unlevered beta',beta_value,'beta',maximum=20.)
     tax,tax_mode=input_override('Corporate tax rate',live_tax,'tax',True)
@@ -117,6 +148,7 @@ with st.expander('Source values and manual overrides',expanded=True):
     else: fs_note='Automatic: USD spread × currency conversion factor'
 
 provenance={name:dict(metadata=m,error=e) for name,(_,m,e) in source.items()}
+provenance['bond_detail_errors']={'us':us_fetch_error,'foreign':foreign_fetch_error}
 provenance.update(tax_selection=tax_note,us_yield=us_meta,target_yield=foreign_meta,
                   overrides=dict(beta=beta_mode,tax=tax_mode,spread=spread_mode,us_yield=us_mode,foreign_yield=foreign_mode,foreign_spread=fs_note))
 with st.expander('Sources, observation dates, retrieval times and fetch diagnostics'):
@@ -169,6 +201,9 @@ else:
     with st.expander('Source error details',expanded=False):
         for source_name,(_,metadata,error) in source.items():
             if error: st.write(f'**{source_name}:** {error}')
+        if us_fetch_error: st.write(f'**US 10Y detail:** {us_fetch_error}')
+        if country!='United States' and foreign_fetch_error:
+            st.write(f'**{country} 10Y detail:** {foreign_fetch_error}')
     st.caption('The Trading Economics public page may omit its live yield table or block automated requests. In that case use the linked website and a dated manual yield; a live quote cannot be verified automatically.')
 
 with st.expander('Methodology and limitations'):
