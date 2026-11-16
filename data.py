@@ -7,7 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 BETA_URL='https://pages.stern.nyu.edu/~adamodar/pc/datasets/betas.xls'
-SPREAD_URL='https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ratings.htm'
+SPREAD_URL='https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ratings.html'
 TAX_URL='https://sdmx.oecd.org/public/rest/v1/data/OECD.CTP.TPS,DSD_TAX_CIT@DF_CIT,2.0/.'
 BONDS_URL='https://tradingeconomics.com/bonds'
 
@@ -49,13 +49,16 @@ def betas():
 
 def spread():
     soup=BeautifulSoup(get(SPREAD_URL).text,'html.parser')
+    page_text=soup.get_text(' ',strip=True)
+    dated=re.search(r'Date of Analysis:\\s*Data used is as of\\s*([A-Za-z]+\\s+\\d{4})',page_text,re.I)
+    observation=dated.group(1) if dated else 'Not published / not parsed'
     # First large-firm panel: rating cell followed immediately by its spread.
     for row in soup.select('tr'):
         cells=[c.get_text(' ',strip=True) for c in row.find_all(['td','th'],recursive=False)]
         for i,c in enumerate(cells[:4]):
             if re.fullmatch(r'Baa2\s*/\s*BBB',c) and i+1<len(cells):
                 m=re.fullmatch(r'([\d.]+)\s*%',cells[i+1])
-                if m: return float(m.group(1))/100,meta(SPREAD_URL)
+                if m: return float(m.group(1))/100,meta(SPREAD_URL,observation)
     raise ValueError('Large-firm Baa2/BBB row not found; manual entry required.')
 
 
@@ -86,7 +89,7 @@ def bonds():
     for table in soup.select('table'):
         headers=[c.get_text(' ',strip=True).lower() for c in table.select('thead th')]
         # Never assume the first numeric column is the last observed yield.
-        idx=next((i for i,h in enumerate(headers) if h in ('yield','last','actual')),None)
+        idx=next((i for i,h in enumerate(headers) if h in ('yield','last','actual','10y yield','last yield')),None)
         if idx is None: continue
         date_idx=next((i for i,h in enumerate(headers) if h in ('date','time')),None)
         for row in table.select('tbody tr'):
@@ -101,5 +104,6 @@ def bonds():
             records.append(dict(country=link.get_text(' ',strip=True),slug=slug,yield_rate=value,
                                 observation_date=cells[date_idx].get_text(' ',strip=True) if date_idx is not None and date_idx<len(cells) else 'Unavailable',
                                 source='https://tradingeconomics.com/'+slug+'/government-bond-yield'))
-    if not records: raise ValueError('Trading Economics returned no recognizable 10-year yield table (possibly blocked or dynamic). Use sourced manual yields.')
+    if not records:
+        raise ValueError('Trading Economics did not expose a parsable public 10-year yield table (dynamic page or blocked request). Open https://tradingeconomics.com/bonds in your browser and enter the dated 10-year yields using manual overrides. This is a data-source limitation, not a calculation error.')
     return pd.DataFrame(records).drop_duplicates('slug'),meta(BONDS_URL)
