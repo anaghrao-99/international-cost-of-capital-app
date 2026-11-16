@@ -96,12 +96,15 @@ with st.expander('Corporate tax data (OECD)',expanded=False):
 yields=source['bonds'][0]
 def yield_for(name):
     if yields is None: return None,{}
-    aliases={'United States':'united-states','United Kingdom':'united-kingdom','Korea, Republic of':'south-korea','Russian Federation':'russia','Türkiye':'turkey'}
-    slug=aliases.get(name,name.lower().replace(' ','-'))
-    rows=yields[yields.slug==slug]
+    aliases={'Korea, Republic of':'South Korea','Russian Federation':'Russia',
+             'Türkiye':'Turkey','Czechia':'Czech Republic','Viet Nam':'Vietnam',
+             'Taiwan, Province of China':'Taiwan'}
+    listed=aliases.get(name,name)
+    rows=yields[yields.country.str.casefold()==listed.casefold()]
     return (float(rows.iloc[0].yield_rate),rows.iloc[0].to_dict()) if len(rows)==1 else (None,{})
-# Prefer the bonds table when available; fall back to the country-specific
-# 10-year quote, which may expose the latest actual while the table is JS-only.
+# First use the published /country-list/government-bond-10y values, which
+# are a server-rendered table. The JS-driven /bonds page was unusable.
+# Fall back to the country detail page only if no country-list rate exists.
 @st.cache_data(ttl=3600,show_spinner=False)
 def fetch_detail_bond(slug):
     try:
@@ -120,6 +123,10 @@ def pick_yield(name, prior_value, prior_meta):
     value,metadata,error=fetch_detail_bond(slug)
     return value,metadata,error
 
+if yields is not None:
+    st.caption(f"Trading Economics 10Y table loaded: {len(yields)} countries • reference dates shown under Sources. Rates may have month-level observation dates.")
+else:
+    st.warning('Trading Economics country-list rates could not be retrieved automatically. Detail-page retrieval will be attempted; manual entry remains available.')
 us,us_meta=yield_for('United States')
 us,us_meta,us_fetch_error=pick_yield('United States',us,us_meta)
 if country=='United States':
