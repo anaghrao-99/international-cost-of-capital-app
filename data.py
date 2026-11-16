@@ -142,14 +142,14 @@ def bond_detail(slug):
     )
     context=' '.join([title,heading_text])
     country_label=slug.replace('-',' ')
-    if not re.search(r'10[- ]?year|10\\s*y(?:ear)?\\b|10y\\b',context,re.I):
+    if not re.search(r'10[- ]?year|10\s*y(?:ear)?\b|10y\b',context,re.I):
         raise ValueError('Neither page title nor primary headings identify a 10-year government yield')
     if country_label not in context.lower() and not (slug=='united-states' and 'us ' in context.lower()):
         raise ValueError('Bond quote page title does not match the selected country')
     # Read the first headline actual value in the main page, not a forecast.
     # TE currently renders a label "Actual" before the observed quote.
     text=(main or soup).get_text(' ',strip=True)
-    head=re.search(r'\\bActual\\s+(-?\\d{1,3}(?:\\.\\d{1,5})?)\\b',text,re.I)
+    head=re.search(r'\bActual\s+(-?\d{1,3}(?:\.\d{1,5})?)\b',text,re.I)
     if head is None:
         raise ValueError('Could not locate the current Actual 10-year quote')
     value=float(head.group(1))
@@ -194,17 +194,17 @@ def parse_country_bond_table(html):
             country=cells[country_idx].get_text(' ',strip=True)
             value=cells[last_idx].get_text(' ',strip=True).replace(',','').replace('%','')
             date=cells[ref_idx].get_text(' ',strip=True)
-            if not re.fullmatch(r'-?\\d{1,3}(?:\\.\\d+)?',value):
+            if not re.fullmatch(r'-?\d{1,3}(?:\.\d+)?',value):
                 continue
             numeric=float(value)
             if not (-20<numeric<100):
                 continue
-            if not re.fullmatch(r'[A-Za-z][A-Za-z .()\\-]{1,60}',country):
+            if not re.fullmatch(r'[A-Za-z][A-Za-z .()\-]{1,60}',country):
                 continue
             if country.lower() in ('report','country list','world'):
                 continue
             # Reference is often just month/year; preserve it without inventing a day.
-            if not re.fullmatch(r'[A-Za-z]{3}/\\d{2,4}',date):
+            if not re.fullmatch(r'[A-Za-z]{3}/\d{2,4}',date):
                 continue
             slug=re.sub(r'[^a-z0-9]+','-',country.lower()).strip('-')
             output.append(dict(country=country,slug=slug,yield_rate=numeric/100,
